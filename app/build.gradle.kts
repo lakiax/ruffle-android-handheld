@@ -23,6 +23,9 @@ android {
     namespace = "rs.ruffle"
     compileSdk = 35
 
+    // [新增] 强制使用你本地安装的 NDK 版本
+    ndkVersion = "26.1.10909125"
+    
     defaultConfig {
         applicationId = "rs.ruffle"
         minSdk = 26
@@ -42,27 +45,28 @@ android {
         }
     }
 
+    // === 【修改点 1】配置本地签名 ===
     signingConfigs {
-        val keyFile = file("androidkey.jks")
-        val storePasswordVal = System.getenv("SIGNING_STORE_PASSWORD")
-        if (keyFile.exists() && storePasswordVal != null && storePasswordVal.isNotEmpty()) {
-            create("release") {
-                storeFile = keyFile
-                storePassword = storePasswordVal
-                keyAlias = System.getenv("SIGNING_KEY_ALIAS")
-                keyPassword = System.getenv("SIGNING_KEY_PASSWORD")
-            }
+        create("release") {
+            // 指向项目根目录下的 my-release-key.jks
+            storeFile = file("${project.rootDir}/my-release-key.jks")
+            storePassword = "123456"
+            keyAlias = "my-key-alias"
+            keyPassword = "123456"
         }
     }
 
     buildTypes {
         release {
+            // === 【修改点 2】开启混淆和资源压缩以减小体积 ===
             isMinifyEnabled = false
+            isShrinkResources = false // 移除未使用的资源文件
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.findByName("release")
+            // 应用上面定义的签名配置
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
@@ -142,6 +146,10 @@ dependencies {
     implementation(libs.androidx.games.activity)
     implementation(libs.androidx.constraintlayout)
     implementation(libs.androidx.appcompat)
+    implementation(libs.gson) // 新增
+    implementation("androidx.documentfile:documentfile:1.0.1") // [阶段二新增] 用于文件夹操作
+    implementation("androidx.compose.material:material-icons-extended:1.6.8")
+    implementation("com.google.code.gson:gson:2.10.1")
     androidTestImplementation(libs.androidx.uiautomator)
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.rules)

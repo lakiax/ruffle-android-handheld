@@ -15,7 +15,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             RuffleTheme {
-                RuffleNavHost(openSwf = { openSwf(it) })
+                RuffleNavHost()
             }
         }
     }

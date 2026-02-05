@@ -43,6 +43,7 @@ androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version
 androidx-uiautomator = { group = "androidx.test.uiautomator", name = "uiautomator", version.ref = "uiautomator" }
 androidx-test-runner = { group = "androidx.test", name = "runner", version.ref = "androidXTestRunner" }
 androidx-test-rules = { group = "androidx.test", name = "rules", version.ref = "androidXTestRules" }
+gson = { module = "com.google.code.gson:gson", version = "2.10.1" }
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }
