@@ -1,12 +1,14 @@
 *.iml
 .gradle
 /local.properties
+!local.properties
 .idea
 .DS_Store
 /build
 /captures
 .externalNativeBuild
 .cxx
-local.properties
+
 /target
 *.jks
+!my-release-key.jks

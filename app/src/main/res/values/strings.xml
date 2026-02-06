@@ -1,6 +1,6 @@
 <resources>
-    <string name="app_name">Ruffle</string>
-    <string name="logo_description">Ruffle Logo</string>
+    <string name="app_name">Flemu</string>
+    <string name="logo_description">Flemu Logo</string>
     <string name="or">or</string>
     <string name="open_url">Open URL</string>
     <string name="select_a_swf">Select a SWF</string>

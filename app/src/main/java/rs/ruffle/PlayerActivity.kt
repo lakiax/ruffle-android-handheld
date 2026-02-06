@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Build.VERSION_CODES
 import android.os.Bundle
 import android.util.Log
+import android.view.KeyEvent // [新增]
 import android.view.Menu
 import android.view.MenuItem
 import android.view.MotionEvent
@@ -28,6 +29,12 @@ import java.io.File
 import java.io.IOException
 
 class PlayerActivity : GameActivity() {
+    // [新增] 用于缓存按键映射关系
+    private var activeKeyMapping: Map<Int, Int> = emptyMap()
+	private lateinit var toolbar: View
+	private lateinit var fabMenu: View
+	private lateinit var mask: View
+	
     @Suppress("unused")
     // Used by Rust
     private val swfBytes: ByteArray?
@@ -151,6 +158,18 @@ class PlayerActivity : GameActivity() {
         return storageDirPath
     }
 
+	private fun showMenu() {
+	    toolbar.visibility = View.VISIBLE
+	    mask.visibility = View.VISIBLE
+	    fabMenu.visibility = View.GONE
+	}
+
+	private fun hideMenu() {
+	    toolbar.visibility = View.GONE
+	    mask.visibility = View.GONE
+	    fabMenu.visibility = View.VISIBLE
+	}
+	
     override fun onCreateSurfaceView() {
         val inflater = layoutInflater
 
@@ -160,6 +179,14 @@ class PlayerActivity : GameActivity() {
         contentViewId = View.generateViewId()
         layout.id = contentViewId
         setContentView(layout)
+	
+	toolbar = layout.findViewById(R.id.toolbar)
+	fabMenu = layout.findViewById(R.id.fab_menu)
+	mask = layout.findViewById(R.id.menu_mask)
+
+	fabMenu.setOnClickListener { showMenu() }
+	mask.setOnClickListener { hideMenu() }
+	
         mSurfaceView = InputEnabledSurfaceView(this)
 
         mSurfaceView.contentDescription = "Ruffle Player"
@@ -193,7 +220,7 @@ class PlayerActivity : GameActivity() {
             }
         }
         layout.findViewById<View>(R.id.button_cm)
-            .setOnClickListener { requestContextMenu() }
+            .setOnClickListener { requestContextMenu()}
         layout.requestLayout()
         layout.requestFocus()
         mSurfaceView.holder.addCallback(this)
@@ -246,9 +273,56 @@ class PlayerActivity : GameActivity() {
         //     IME_ACTION_NONE, IME_FLAG_NO_FULLSCREEN );
         requestNoStatusBarFeature()
         supportActionBar?.hide()
+	
+        // [新增] 启动前加载按键映射配置
+        loadKeyMappings()
+	
         super.onCreate(savedInstanceState)
+    }   
+
+    // [新增] 读取按键映射配置
+    private fun loadKeyMappings() {
+        try {
+            val gameUri = intent.data?.toString()
+            // 1. 读取全局配置
+            val globalMapping = PreferencesManager.getGlobalMapping(this)
+            val finalMapping = java.util.HashMap(globalMapping)
+            
+            // 2. 读取局部配置 (如果有)
+            if (gameUri != null) {
+                val localMapping = PreferencesManager.getGameMapping(this, gameUri)
+                if (localMapping.isNotEmpty()) {
+                    finalMapping.putAll(localMapping)
+                }
+            }
+            activeKeyMapping = finalMapping
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
+    // [新增] 拦截并处理按键事件
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // 如果有映射配置，检查是否需要替换
+        if (activeKeyMapping.isNotEmpty()) {
+            val targetCode = activeKeyMapping[event.keyCode]
+            // 如果存在映射目标，且目标键值不等于原键值
+            if (targetCode != null && targetCode != event.keyCode) {
+                val newEvent = KeyEvent(
+                    event.downTime, event.eventTime, event.action,
+                    targetCode, // 替换为映射后的键值
+                    event.repeatCount, event.metaState,
+                    event.deviceId, event.scanCode,
+                    event.flags, event.source
+                )
+                // 发送修改后的事件给游戏
+                return super.dispatchKeyEvent(newEvent)
+            }
+        }
+        // 没有映射或不需要替换，直接发送原始事件
+        return super.dispatchKeyEvent(event)
+    }
+    
     // Used by Rust
     @Suppress("unused")
     val isGooglePlayGames: Boolean
@@ -291,4 +365,5 @@ class PlayerActivity : GameActivity() {
     fun interface CrashCallback {
         fun onCrash(message: String)
     }
+
 }
