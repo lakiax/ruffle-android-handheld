@@ -8,7 +8,7 @@ import android.os.Build
 import android.os.Build.VERSION_CODES
 import android.os.Bundle
 import android.util.Log
-import android.view.KeyEvent // [新增]
+import android.view.KeyEvent
 import android.view.Menu
 import android.view.MenuItem
 import android.view.MotionEvent
@@ -23,18 +23,22 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import android.view.InputDevice
 import com.google.androidgamesdk.GameActivity
 import java.io.DataInputStream
 import java.io.File
 import java.io.IOException
 
 class PlayerActivity : GameActivity() {
-    // [新增] 用于缓存按键映射关系
-    private var activeKeyMapping: Map<Int, Int> = emptyMap()
+    // 用于缓存按键映射关系
+	private var activeKeyMapping: Map<Int, Int> = emptyMap()
+	private val pressedMappedKeys = HashSet<Int>()
 	private lateinit var toolbar: View
 	private lateinit var fabMenu: View
 	private lateinit var mask: View
-	
+
+    // [删除] 删除了原来的 keyToNativeTag，现在使用 VirtualKeys.getTag() 动态获取
+    
     @Suppress("unused")
     // Used by Rust
     private val swfBytes: ByteArray?
@@ -180,12 +184,12 @@ class PlayerActivity : GameActivity() {
         layout.id = contentViewId
         setContentView(layout)
 	
-	toolbar = layout.findViewById(R.id.toolbar)
-	fabMenu = layout.findViewById(R.id.fab_menu)
-	mask = layout.findViewById(R.id.menu_mask)
-
-	fabMenu.setOnClickListener { showMenu() }
-	mask.setOnClickListener { hideMenu() }
+    	toolbar = layout.findViewById(R.id.toolbar)
+    	fabMenu = layout.findViewById(R.id.fab_menu)
+    	mask = layout.findViewById(R.id.menu_mask)
+    
+    	fabMenu.setOnClickListener { showMenu() }
+    	mask.setOnClickListener { hideMenu() }
 	
         mSurfaceView = InputEnabledSurfaceView(this)
 
@@ -280,17 +284,28 @@ class PlayerActivity : GameActivity() {
         super.onCreate(savedInstanceState)
     }   
 
-    // [新增] 读取按键映射配置
+// [修改] 读取按键映射配置 - 增加 URI 解码以匹配设置页面的 Key
     private fun loadKeyMappings() {
         try {
-            val gameUri = intent.data?.toString()
+            val rawUri = intent.data?.toString()
+            // 修复: 对 URI 进行解码，因为 Navigation 传参时通常是解码后的，需保持 Key 一致
+            val gameUri = if (rawUri != null) Uri.decode(rawUri) else null
+            
             // 1. 读取全局配置
             val globalMapping = PreferencesManager.getGlobalMapping(this)
             val finalMapping = java.util.HashMap(globalMapping)
             
-            // 2. 读取局部配置 (如果有)
+            // 2. 读取局部配置
             if (gameUri != null) {
-                val localMapping = PreferencesManager.getGameMapping(this, gameUri)
+                // 优先尝试解码后的 URI
+                var localMapping = PreferencesManager.getGameMapping(this, gameUri)
+                
+                // 保底: 如果解码后没找到，且原始 URI 不同，尝试原始 URI (防止部分情况未编码)
+                if (localMapping.isEmpty() && rawUri != gameUri) {
+                    val rawMapping = PreferencesManager.getGameMapping(this, rawUri!!)
+                    if (rawMapping.isNotEmpty()) localMapping = rawMapping
+                }
+
                 if (localMapping.isNotEmpty()) {
                     finalMapping.putAll(localMapping)
                 }
@@ -301,27 +316,67 @@ class PlayerActivity : GameActivity() {
         }
     }
 
-    // [新增] 拦截并处理按键事件
+    // [最终优化版] 动态分发按键事件
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        // 如果有映射配置，检查是否需要替换
-        if (activeKeyMapping.isNotEmpty()) {
-            val targetCode = activeKeyMapping[event.keyCode]
-            // 如果存在映射目标，且目标键值不等于原键值
-            if (targetCode != null && targetCode != event.keyCode) {
-                val newEvent = KeyEvent(
-                    event.downTime, event.eventTime, event.action,
-                    targetCode, // 替换为映射后的键值
-                    event.repeatCount, event.metaState,
-                    event.deviceId, event.scanCode,
-                    event.flags, event.source
-                )
-                // 发送修改后的事件给游戏
-                return super.dispatchKeyEvent(newEvent)
+        // 1. 获取映射后的 KeyCode (如果没有映射则保持原样)
+        val mappedKeyCode = activeKeyMapping[event.keyCode] ?: event.keyCode
+
+        // 2. [动态查找] 尝试通过 VirtualKeys 获取对应的 Native Tag
+        // 这意味着只要你在设置里映射到了某个虚拟键（如 SPACE, A, 1），这里就能获取到对应的 Tag
+        val nativeTag = VirtualKeys.getTag(mappedKeyCode)
+
+        if (nativeTag != null) {
+            // [核心逻辑] 拦截并伪装成虚拟按键
+            
+            // 过滤重复事件：只处理 DOWN 和 UP
+            if (event.repeatCount > 0 && event.action == KeyEvent.ACTION_DOWN) {
+                return true
             }
+
+            when (event.action) {
+                KeyEvent.ACTION_DOWN -> {
+                    if (!pressedMappedKeys.contains(mappedKeyCode)) {
+                        keydown(nativeTag)
+                        pressedMappedKeys.add(mappedKeyCode)
+                    }
+                }
+                KeyEvent.ACTION_UP -> {
+                    keyup(nativeTag)
+                    pressedMappedKeys.remove(mappedKeyCode)
+                }
+            }
+            // 拦截事件，不再传给底层 InputQueue，彻底解决卡死
+            return true 
         }
-        // 没有映射或不需要替换，直接发送原始事件
+
+        // 3. 没在映射表里，也不是已知虚拟键的按键（如音量、Home），走系统默认逻辑
         return super.dispatchKeyEvent(event)
     }
+
+	private fun releaseAllPressedKeys(base: KeyEvent? = null) {
+	    if (pressedMappedKeys.isEmpty()) return
+	    val keys = pressedMappedKeys.toList()
+	    pressedMappedKeys.clear()
+        
+        // 既然我们现在主要靠 tag 调用 keyup，这里也应该尝试用 tag 释放
+	    for (code in keys) {
+            val tag = VirtualKeys.getTag(code)
+            if (tag != null) {
+                 keyup(tag)
+            }
+	    }
+	}
+	
+	override fun onWindowFocusChanged(hasFocus: Boolean) {
+	    super.onWindowFocusChanged(hasFocus)
+	    if (!hasFocus) releaseAllPressedKeys(null) else mSurfaceView?.requestFocus()
+	}
+
+	override fun onPause() {
+	    releaseAllPressedKeys(null)
+	    super.onPause()
+	}
+
     
     // Used by Rust
     @Suppress("unused")

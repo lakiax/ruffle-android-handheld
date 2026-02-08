@@ -19,14 +19,4 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-
-    private fun openSwf(uri: Uri) {
-        val intent = Intent(
-            this@MainActivity,
-            PlayerActivity::class.java
-        ).apply {
-            data = uri
-        }
-        startActivity(intent)
-    }
 }

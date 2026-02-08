@@ -1,0 +1,6 @@
+Change dir-path in following files:
+
+gradle/wrapper/gradle-wrapper.properties
+local.properties
+AddNdkPath
+
